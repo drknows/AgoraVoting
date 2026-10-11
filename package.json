@@ -1,6 +1,6 @@
 {
   "name": "agora-voting-platform",
-  "version": "2.3.0",
+  "version": "2.5.0",
   "private": true,
   "scripts": {
     "dev": "next dev",
@@ -9,8 +9,11 @@
     "lint": "next lint"
   },
   "dependencies": {
+    "fflate": "^0.8.3",
     "next": "14.2.3",
+    "pg": "^8.23.1",
     "react": "^18",
-    "react-dom": "^18"
+    "react-dom": "^18",
+    "unpdf": "^0.12.2"
   }
 }

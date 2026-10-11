@@ -1,24 +1,19 @@
 /**
- * Crowdsource Democracy — citizen proposals, votes and comments.
+ * Crowdsource Democracy — citizen law ideas, votes and debate (Postgres).
  *
- * Storage: Upstash Redis over its REST API (free tier, added in Vercel under
- * Storage → Upstash → Redis). Vercel sets KV_REST_API_URL / KV_REST_API_TOKEN
- * (or UPSTASH_REDIS_REST_URL / UPSTASH_REDIS_REST_TOKEN) automatically when
- * the database is connected to the project.
- *
- *   GET  /api/crowd?sort=top|new                 → list proposals
- *   GET  /api/crowd?id=<id>                      → one proposal + comments
- *   POST /api/crowd {action:"create", title, body, category, name}
- *   POST /api/crowd {action:"vote", id, dir: 1|-1|0}
- *   POST /api/crowd {action:"comment", id, text, name, stance}
+ *   GET  /api/crowd?sort=top|new&category=     → list ideas
+ *   GET  /api/crowd?id=<id>                    → one idea + comments
+ *   POST {action:"create", title, body, category, name}
+ *   POST {action:"vote", id, dir: 1|-1|0}
+ *   POST {action:"comment", id, text, name, stance}
+ * Signed-in members vote as themselves; visitors are identified by a hashed IP.
  */
-import crypto from "node:crypto";
+import { handler, json, readJson, clientIp, clean, HttpError } from "../../../lib/server/http";
+import { query, one, requireRate } from "../../../lib/server/db";
+import { currentMember } from "../../../lib/server/auth";
+import { fingerprint, randomId } from "../../../lib/server/crypto";
 
 export const dynamic = "force-dynamic";
-
-const URL_ = process.env.KV_REST_API_URL || process.env.UPSTASH_REDIS_REST_URL || "";
-const TOKEN = process.env.KV_REST_API_TOKEN || process.env.UPSTASH_REDIS_REST_TOKEN || "";
-const SALT = process.env.CROWD_SALT || TOKEN.slice(0, 16) || "agora";
 
 const CATEGORIES = [
   "Voting & Elections", "Government Ethics", "Civil Rights", "Economy & Jobs",
@@ -26,145 +21,76 @@ const CATEGORIES = [
   "Technology & Privacy", "Local Issues", "Other",
 ];
 
-function json(body, status = 200) {
-  return new Response(JSON.stringify(body), {
-    status,
-    headers: { "content-type": "application/json", "cache-control": "no-store" },
-  });
+async function voterId(request) {
+  const m = await currentMember(request);
+  return m ? `m:${m.id}` : `v:${fingerprint("visitor", clientIp(request)).slice(0, 32)}`;
 }
 
-async function redis(commands) {
-  const res = await fetch(`${URL_}/pipeline`, {
-    method: "POST",
-    headers: { authorization: `Bearer ${TOKEN}`, "content-type": "application/json" },
-    body: JSON.stringify(commands),
-    cache: "no-store",
-  });
-  if (!res.ok) throw new Error(`Database error ${res.status}`);
-  const out = await res.json();
-  return out.map((r) => {
-    if (r.error) throw new Error(r.error);
-    return r.result;
-  });
-}
+const IDEA_SQL = `select i.id, i.title, i.body, i.category, i.name, extract(epoch from i.created_at)*1000 as created,
+  coalesce((select count(*) from crowd_votes v where v.idea_id=i.id and v.dir=1),0)::int as up,
+  coalesce((select count(*) from crowd_votes v where v.idea_id=i.id and v.dir=-1),0)::int as down,
+  (select count(*) from crowd_comments c where c.idea_id=i.id)::int as comments
+  from crowd_ideas i`;
+const shape = r => r && ({ ...r, created: Number(r.created) });
 
-const clean = (s, max) =>
-  String(s ?? "")
-    .replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/g, "")
-    .trim()
-    .slice(0, max);
-
-function visitor(request) {
-  const ip =
-    request.headers.get("x-forwarded-for")?.split(",")[0].trim() ||
-    request.headers.get("x-real-ip") || "unknown";
-  return crypto.createHash("sha256").update(`${SALT}:${ip}`).digest("hex").slice(0, 24);
-}
-
-async function rateLimit(who, kind, max, seconds) {
-  const key = `rl:${kind}:${who}:${Math.floor(Date.now() / 1000 / seconds)}`;
-  const [count] = await redis([["INCR", key], ["EXPIRE", key, String(seconds)]]);
-  return count <= max;
-}
-
-const parse = (s) => { try { return JSON.parse(s); } catch { return null; } };
-
-export async function GET(request) {
-  if (!URL_ || !TOKEN) return json({ error: "Crowdsource storage not configured", setup: true }, 503);
-  const { searchParams } = new URL(request.url);
-  try {
-    const id = searchParams.get("id");
-    if (id) {
-      if (!/^[a-f0-9-]{8,40}$/.test(id)) return json({ error: "Bad id" }, 400);
-      const [idea, comments] = await redis([
-        ["GET", `idea:${id}`],
-        ["LRANGE", `idea:${id}:comments`, "0", "199"],
-      ]);
-      if (!idea) return json({ error: "Not found" }, 404);
-      return json({ idea: parse(idea), comments: (comments || []).map(parse).filter(Boolean) });
-    }
-    const sort = searchParams.get("sort") === "new" ? "ideas:new" : "ideas:top";
-    const category = searchParams.get("category");
-    const [ids] = await redis([["ZREVRANGE", sort, "0", "199"]]);
-    if (!ids?.length) return json({ ideas: [], categories: CATEGORIES });
-    const [rows] = await redis([["MGET", ...ids.map((i) => `idea:${i}`)]]);
-    let ideas = rows.map(parse).filter(Boolean).filter((i) => !i.hidden);
-    if (category && CATEGORIES.includes(category)) ideas = ideas.filter((i) => i.category === category);
-    return json({ ideas: ideas.slice(0, 60), categories: CATEGORIES });
-  } catch (e) {
-    return json({ error: e.message }, 502);
+export const GET = handler(async request => {
+  const p = new URL(request.url).searchParams;
+  const id = p.get("id");
+  if (id) {
+    const idea = shape(await one(`${IDEA_SQL} where i.id=$1 and not i.hidden`, [id]));
+    if (!idea) throw new HttpError(404, "Not found");
+    const comments = (await query(
+      "select text, name, stance, extract(epoch from created_at)*1000 as created from crowd_comments where idea_id=$1 order by created_at desc limit 200", [id]
+    )).rows.map(shape);
+    return json({ idea, comments });
   }
-}
+  const params = [];
+  let where = "where not i.hidden";
+  const category = p.get("category");
+  if (category && CATEGORIES.includes(category)) where += ` and i.category=$${params.push(category)}`;
+  const order = p.get("sort") === "new" ? "created desc" : "(up - down) desc, created desc";
+  const ideas = (await query(`select * from (${IDEA_SQL} ${where}) x order by ${order} limit 60`, params)).rows.map(shape);
+  return json({ ideas, categories: CATEGORIES });
+});
 
-export async function POST(request) {
-  if (!URL_ || !TOKEN) return json({ error: "Crowdsource storage not configured", setup: true }, 503);
-  const body = await request.json().catch(() => ({}));
-  const who = visitor(request);
-  try {
-    if (body.action === "create") {
-      const title = clean(body.title, 120);
-      const text = clean(body.body, 2000);
-      const name = clean(body.name, 40) || "Anonymous citizen";
-      const category = CATEGORIES.includes(body.category) ? body.category : "Other";
-      if (title.length < 8) return json({ error: "Title needs at least 8 characters" }, 400);
-      if (text.length < 20) return json({ error: "Please describe the idea in at least 20 characters" }, 400);
-      if (!(await rateLimit(who, "create", 3, 3600)))
-        return json({ error: "Limit reached: 3 proposals per hour" }, 429);
-      const id = crypto.randomUUID();
-      const idea = { id, title, body: text, category, name, created: Date.now(), up: 0, down: 0, comments: 0 };
-      await redis([
-        ["SET", `idea:${id}`, JSON.stringify(idea)],
-        ["ZADD", "ideas:new", String(idea.created), id],
-        ["ZADD", "ideas:top", "0", id],
-      ]);
-      return json({ idea });
-    }
+export const POST = handler(async request => {
+  const body = await readJson(request);
+  const who = await voterId(request);
 
-    const id = clean(body.id, 40);
-    if (!/^[a-f0-9-]{8,40}$/.test(id)) return json({ error: "Bad id" }, 400);
-    const [raw] = await redis([["GET", `idea:${id}`]]);
-    const idea = parse(raw);
-    if (!idea) return json({ error: "Not found" }, 404);
-
-    if (body.action === "vote") {
-      if (!(await rateLimit(who, "vote", 60, 3600))) return json({ error: "Too many votes — try later" }, 429);
-      const dir = [1, -1, 0].includes(body.dir) ? body.dir : 0;
-      const ops = [
-        ["SREM", `idea:${id}:up`, who],
-        ["SREM", `idea:${id}:down`, who],
-      ];
-      if (dir === 1) ops.push(["SADD", `idea:${id}:up`, who]);
-      if (dir === -1) ops.push(["SADD", `idea:${id}:down`, who]);
-      ops.push(["SCARD", `idea:${id}:up`], ["SCARD", `idea:${id}:down`]);
-      const out = await redis(ops);
-      idea.up = out[out.length - 2];
-      idea.down = out[out.length - 1];
-      await redis([
-        ["SET", `idea:${id}`, JSON.stringify(idea)],
-        ["ZADD", "ideas:top", String(idea.up - idea.down), id],
-      ]);
-      return json({ idea, myVote: dir });
-    }
-
-    if (body.action === "comment") {
-      const text = clean(body.text, 1000);
-      const name = clean(body.name, 40) || "Anonymous citizen";
-      const stance = ["support", "oppose", "question"].includes(body.stance) ? body.stance : "question";
-      if (text.length < 3) return json({ error: "Comment is empty" }, 400);
-      if (!(await rateLimit(who, "comment", 20, 3600)))
-        return json({ error: "Limit reached: 20 comments per hour" }, 429);
-      const comment = { text, name, stance, created: Date.now() };
-      idea.comments = (idea.comments || 0) + 1;
-      await redis([
-        ["LPUSH", `idea:${id}:comments`, JSON.stringify(comment)],
-        ["LTRIM", `idea:${id}:comments`, "0", "499"],
-        ["SET", `idea:${id}`, JSON.stringify(idea)],
-      ]);
-      return json({ comment, idea });
-    }
-
-    return json({ error: "Unknown action" }, 400);
-  } catch (e) {
-    return json({ error: e.message }, 502);
+  if (body.action === "create") {
+    const title = clean(body.title, 120), text = clean(body.body, 2000);
+    const name = clean(body.name, 40) || "Anonymous citizen";
+    const category = CATEGORIES.includes(body.category) ? body.category : "Other";
+    if (title.length < 8) throw new HttpError(400, "Title needs at least 8 characters");
+    if (text.length < 20) throw new HttpError(400, "Please describe the idea in at least 20 characters");
+    await requireRate(`crowd-create:${who}`, 3, 3600, "Limit reached: 3 proposals per hour");
+    const id = randomId();
+    await query("insert into crowd_ideas(id, title, body, category, name) values($1,$2,$3,$4,$5)", [id, title, text, category, name]);
+    return json({ idea: shape(await one(`${IDEA_SQL} where i.id=$1`, [id])) });
   }
-}
+
+  const id = clean(body.id, 40);
+  if (!(await one("select 1 from crowd_ideas where id=$1 and not hidden", [id]))) throw new HttpError(404, "Not found");
+
+  if (body.action === "vote") {
+    await requireRate(`crowd-vote:${who}`, 60, 3600, "Too many votes — try later");
+    const dir = [1, -1].includes(body.dir) ? body.dir : 0;
+    if (dir === 0) await query("delete from crowd_votes where idea_id=$1 and voter=$2", [id, who]);
+    else await query(
+      "insert into crowd_votes(idea_id, voter, dir) values($1,$2,$3) on conflict (idea_id, voter) do update set dir=excluded.dir",
+      [id, who, dir]);
+    return json({ idea: shape(await one(`${IDEA_SQL} where i.id=$1`, [id])), myVote: dir });
+  }
+
+  if (body.action === "comment") {
+    const text = clean(body.text, 1000), name = clean(body.name, 40) || "Anonymous citizen";
+    const stance = ["support", "oppose", "question"].includes(body.stance) ? body.stance : "question";
+    if (text.length < 3) throw new HttpError(400, "Comment is empty");
+    await requireRate(`crowd-comment:${who}`, 20, 3600, "Limit reached: 20 comments per hour");
+    const c = await one(
+      "insert into crowd_comments(idea_id, text, name, stance) values($1,$2,$3,$4) returning text, name, stance, extract(epoch from created_at)*1000 as created",
+      [id, text, name, stance]);
+    return json({ comment: shape(c), idea: shape(await one(`${IDEA_SQL} where i.id=$1`, [id])) });
+  }
+  throw new HttpError(400, "Unknown action");
+});

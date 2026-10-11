@@ -10,6 +10,8 @@ import {
 } from "./VoteSections";
 import { Crowdsource, ExpertAnalysis, Meetings, Arrests, EthicsFactCheck } from "./PhaseTwoSections";
 import { LegislationReview } from "./LegislationReview";
+import { Disclosures } from "../agora/Disclosures";
+import { ReportCards } from "../agora/ReportCards";
 
 /* ─────────────────────────────────────────────────────────────────
    FUNDRAISING — FEC API
@@ -279,6 +281,8 @@ function InvestmentsPanel() {
 ───────────────────────────────────────────────────────────────── */
 const TABS = [
   { id:"review",     label:"📜 Legislation Review", live:true },
+  { id:"disclosures",label:"💼 Financial Disclosures", live:true },
+  { id:"grades",     label:"📊 Report Cards",      live:true },
   { id:"votes",      label:"🗳 Congress Votes",    live:true  },
   { id:"recent",     label:"🏛 Recent Roll Calls", live:true  },
   { id:"state",      label:"🏢 State Votes",       live:true  },
@@ -395,6 +399,8 @@ export default function CivicPlatform() {
           {activeTab === "donors"      && <InvestmentsPanel />}
           {activeTab === "lobbying"    && <LobbyingTracker />}
           {activeTab === "review"      && <LegislationReview />}
+          {activeTab === "disclosures" && <Disclosures />}
+          {activeTab === "grades"      && <ReportCards />}
           {activeTab === "crowdsource" && <Crowdsource />}
           {activeTab === "experts"     && <ExpertAnalysis />}
           {activeTab === "arrests"     && <Arrests />}

@@ -1,7 +1,7 @@
 "use client";
 /**
  * Phase 2 civic sections, shared by /civic and the main Civic Transparency tab.
- *   Crowdsource     — citizen proposals, votes, comments (/api/crowd, Upstash Redis)
+ *   Crowdsource     — citizen proposals, votes, comments (/api/crowd, Postgres)
  *   Expert Analysis — CBO, GAO and CRS nonpartisan reports
  *   Meetings        — congressional committee meetings & hearings (Congress.gov)
  *   Arrests         — DOJ press releases about charged/convicted public officials
@@ -135,8 +135,8 @@ export function Crowdsource() {
 
   if (setup) return (
     <div style={noteBox}>
-      <strong>🗄 One-time setup needed:</strong> Crowdsource stores proposals in a free database.
-      In Vercel, open this project → <strong>Storage</strong> → <strong>Create Database</strong> → <strong>Upstash for Redis</strong> (free plan)
+      <strong>🗄 One-time setup needed:</strong> Crowdsource stores proposals in Agora's database.
+      In Vercel, open this project → <strong>Storage</strong> → <strong>Create Database</strong> → <strong>Neon</strong> (free plan)
       → connect it to this project, then <strong>Redeploy</strong>. No code changes are needed.
     </div>
   );

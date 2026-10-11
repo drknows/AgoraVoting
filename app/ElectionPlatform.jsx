@@ -6,6 +6,13 @@ import {
   cachedFetch, API_KEYS
 } from "./apiConfig";
 import { CivicTheme } from "./civic/ui";
+import { AccountChip, VerificationWizard } from "./agora/Account";
+import { CommunityHub } from "./agora/Community";
+import { LiveTracker } from "./agora/Tracker";
+import { OfficialElections } from "./agora/Elections";
+import { AdminConsole } from "./agora/Admin";
+import { Disclosures } from "./agora/Disclosures";
+import { ReportCards } from "./agora/ReportCards";
 import {
   VotingRecords, RecentVotes, MemberSearch, LegislationTracker, StateVotes, LocalVotes,
 } from "./civic/VoteSections";
@@ -1098,7 +1105,7 @@ function MethodResults({ result, candidates, G }) {
 }
 
 // ─── Results & Audit ──────────────────────────────────────────────
-function ResultsView({ races, polls, voters, released, onRelease, auditLog, G, t }) {
+function ResultsView({ races, polls, voters, released, onRelease, isAdmin, auditLog, G, t }) {
   const [verifyHash, setVerifyHash] = useState(""); const [verifyRes, setVerifyRes] = useState(null);
   const [activeTab, setActiveTab] = useState("elections");
 
@@ -1152,7 +1159,7 @@ function ResultsView({ races, polls, voters, released, onRelease, auditLog, G, t
                 <div style={{ fontFamily: "'Syne',sans-serif", fontWeight: 700, fontSize: 16, color: G.text }}>{race.title}</div>
               </div>
               <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
-                {!isRel && <Btn onClick={() => onRelease(race.id)} size="sm" variant="gold">{t.releaseResults}</Btn>}
+                {!isRel && isAdmin && <Btn onClick={() => onRelease(race.id)} size="sm" variant="gold">{t.releaseResults}</Btn>}
                 {isRel ? <Chip label={t.resultsReleased} color={G.green} /> : <Chip label={`Release: ${race.releaseTime}`} color={G.gold} />}
               </div>
             </div>
@@ -1227,14 +1234,14 @@ function ResultsView({ races, polls, voters, released, onRelease, auditLog, G, t
 }
 
 // ─── Admin panel ──────────────────────────────────────────────────
-function AdminPanel({ races, voters, polls, onToggleRace, onDeleteRace, onUpdateReleaseTime, onUpdateMethod, onUpdateSeats, onCreatePoll, G, t }) {
-  const [pin, setPin] = useState(""); const [unlocked, setUnlocked] = useState(false); const [err, setErr] = useState("");
+function AdminPanel({ races, voters, polls, onToggleRace, onDeleteRace, onUpdateReleaseTime, onUpdateMethod, onUpdateSeats, onCreatePoll, onSignOut, G, t }) {
+  // Access is granted by the server-side admin session (see /api/admin); there is no PIN in the page.
+  const unlocked = true; const [err, setErr] = useState("");
   const [newPollTitle, setNewPollTitle] = useState(""); const [newPollDesc, setNewPollDesc] = useState("");
   const [newPollOpts, setNewPollOpts] = useState(["", ""]);
   const [activeTab, setActiveTab] = useState("races");
   const [releaseTimes, setReleaseTimes] = useState({});
 
-  function login() { if (pin === "admin123") { setUnlocked(true); logAudit("ADMIN_LOGIN", "Admin panel accessed"); } else setErr("Incorrect admin PIN."); }
 
   function addPoll() {
     const opts = newPollOpts.filter(Boolean);
@@ -1254,18 +1261,12 @@ function AdminPanel({ races, voters, polls, onToggleRace, onDeleteRace, onUpdate
 
   return (
     <div>
-      <div style={{ fontFamily: "'Syne',sans-serif", fontWeight: 800, fontSize: 24, color: G.text, marginBottom: 4 }}>Admin Panel</div>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12 }}>
+        <div style={{ fontFamily: "'Syne',sans-serif", fontWeight: 800, fontSize: 24, color: G.text, marginBottom: 4 }}>Admin Panel</div>
+        <Btn onClick={onSignOut} variant="outline" size="sm">Sign out</Btn>
+      </div>
       <div style={{ fontSize: 13, color: G.textMid, marginBottom: 20 }}>Manage elections, results, and voter rolls.</div>
-      {!unlocked ? (
-        <Card G={G}>
-          <div style={{ fontWeight: 600, marginBottom: 14, color: G.text }}>{t.adminUnlock}</div>
-          <div style={{ display: "flex", gap: 10 }}>
-            <input type="password" value={pin} onChange={e => setPin(e.target.value)} onKeyDown={e => e.key === "Enter" && login()} placeholder="Admin PIN (hint: admin123)" style={{ flex: 1, background: G.bg, border: `1px solid ${G.border2}`, borderRadius: 8, padding: "10px 13px", color: G.text, fontFamily: "inherit", fontSize: 14, outline: "none", maxWidth: 280 }} />
-            <Btn onClick={login}>Unlock</Btn>
-          </div>
-          {err && <div style={{ color: G.red, fontSize: 13, marginTop: 10 }}>⚠ {err}</div>}
-        </Card>
-      ) : (
+      {unlocked && (
         <>
           <div style={{ display: "flex", gap: 2, marginBottom: 24, background: G.surface, border: `1px solid ${G.border}`, borderRadius: 10, padding: 3 }}>
             {adminTabs.map(tb => <button key={tb.id} onClick={() => setActiveTab(tb.id)} style={{ flex: 1, padding: "8px 10px", borderRadius: 8, border: activeTab === tb.id ? `1px solid ${G.border2}` : "1px solid transparent", background: activeTab === tb.id ? G.surface2 : "transparent", color: activeTab === tb.id ? G.text : G.textDim, cursor: "pointer", fontFamily: "inherit", fontSize: 13, fontWeight: 600, transition: "all 0.15s" }}>{tb.label}</button>)}
@@ -1689,6 +1690,8 @@ function CivicComingSoon({ label, description, G }) {
 // ── Main Civic Tab shell ──────────────────────────────────────────
 const CIVIC_TABS = [
   { id:"review",      label:"📜 Legislation Review", live:true, desc:"Summaries of new federal, state, county and city legislation, linked to the full official record." },
+  { id:"disclosures", label:"💼 Financial Disclosures", live:true, desc:"Stock trades, CDs, real estate and other transactions disclosed by officials — federal, state and local." },
+  { id:"grades",      label:"📊 Report Cards",     live:true,  desc:"Ethics and economic grades for national, state, county and city governments." },
   { id:"votes",       label:"🗳 Congress Votes",   live:true,  desc:"Pick a state to see its members of Congress and how each voted on the latest roll calls." },
   { id:"recent",      label:"🏛 Recent Roll Calls", live:true, desc:"Latest Senate and House roll-call votes, with how every member voted." },
   { id:"state",       label:"🏢 State Votes",      live:true,  desc:"Roll-call votes in all 50 state legislatures, via OpenStates." },
@@ -1751,6 +1754,8 @@ function CivicTab({ G }) {
           {activeTab==="member"    && <MemberSearch />}
           {activeTab==="bills"     && <LegislationTracker />}
           {activeTab==="review"    && <LegislationReview />}
+          {activeTab==="disclosures" && <Disclosures />}
+          {activeTab==="grades"    && <ReportCards />}
           {activeTab==="crowdsource" && <Crowdsource />}
           {activeTab==="experts"   && <ExpertAnalysis />}
           {activeTab==="arrests"   && <Arrests />}
@@ -1773,10 +1778,9 @@ function CivicTab({ G }) {
 const MAIN_TABS = (t) => [
   { id: "election", label: t.officialElection },
   { id: "polls", label: t.communityPolls },
-  { id: "results", label: t.resultsAudit },
+  { id: "results", label: "📈 Live Results" },
   { id: "register", label: t.registerTab },
   { id: "civic", label: "🏛 Civic Transparency" },
-  { id: "admin", label: "⚙️ Admin" },
 ];
 
 export default function App() {
@@ -1791,6 +1795,33 @@ export default function App() {
   const [released, setReleased] = useState({});
   const [regSuccess, setRegSuccess] = useState(null);
   const [auditLog, setAuditLog] = useState([]);
+  const [isAdmin, setIsAdmin] = useState(false);
+
+  // Admin access is decided by the server (signed, HttpOnly cookie set at /admin).
+  useEffect(() => {
+    let cancelled = false;
+    fetch("/api/admin", { cache: "no-store" }).then(r => r.json()).then(s => {
+      if (cancelled) return;
+      setIsAdmin(!!s.admin);
+      const wanted = new URLSearchParams(window.location.search).get("tab");
+      if (s.admin && wanted === "admin") { setTab("admin"); logAudit("ADMIN_LOGIN", "Admin panel accessed"); }
+    }).catch(() => {});
+    return () => { cancelled = true; };
+  }, []);
+  useEffect(() => { if (!isAdmin && tab === "admin") setTab("election"); }, [isAdmin, tab]);
+  useEffect(() => {
+    const wanted = new URLSearchParams(window.location.search).get("tab");
+    if (wanted && ["election", "polls", "results", "register", "civic"].includes(wanted)) setTab(wanted);
+    const h = e => { setTab(e.detail); window.scrollTo({ top: 0, behavior: "smooth" }); };
+    window.addEventListener("agora:tab", h);
+    return () => window.removeEventListener("agora:tab", h);
+  }, []);
+  async function adminSignOut() {
+    await fetch("/api/admin", { method: "DELETE" }).catch(() => {});
+    logAudit("ADMIN_LOGOUT", "Admin signed out");
+    setIsAdmin(false); setTab("election");
+    window.history.replaceState(null, "", "/");
+  }
 
   // Accessibility & theme
   const [dark, setDark] = useState(true);
@@ -1854,7 +1885,7 @@ export default function App() {
     showToast(t.voteCast, "success");
   }
 
-  const TABS = MAIN_TABS(t);
+  const TABS = isAdmin ? [...MAIN_TABS(t), { id: "admin", label: "⚙️ Admin" }] : MAIN_TABS(t);
   const css2 = `
     @import url('https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=Instrument+Sans:wght@400;500;600&display=swap');
     * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -1886,15 +1917,7 @@ export default function App() {
           <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
             <SessionTimer voter={currentVoter} onExpire={() => { setCurrentVoter(null); showToast("Session expired. Please sign in again.", "warning"); logAudit("SESSION_EXPIRED", currentVoter?.id || ""); }} G={G} t={t} />
             <LangPicker lang={lang} setLang={setLang} G={G} />
-            {currentVoter && <div className="hide-mobile" style={{ display: "flex", gap: 6, alignItems: "center" }}>
-              <Chip label={currentVoter.tier === 2 ? "🏛 Official" : "📋 Poll"} color={currentVoter.tier === 2 ? G.gold : G.blue} />
-              <span style={{ fontSize: 12, color: G.textMid }}>{currentVoter.name.split(" ")[0]}</span>
-            </div>}
-            <div onClick={() => { if (currentVoter) { setCurrentVoter(null); showToast(t.signedOut, "info"); logAudit("LOGOUT", currentVoter?.id || ""); } else setSigninOpen(true); }}
-              style={{ display: "flex", alignItems: "center", gap: 7, background: G.surface2, border: `1px solid ${G.border2}`, borderRadius: 8, padding: "7px 13px", cursor: "pointer", fontSize: 13, flexShrink: 0 }}>
-              <div style={{ width: 7, height: 7, borderRadius: "50%", background: currentVoter ? G.green : G.red }} />
-              {currentVoter ? t.signOut : t.signIn}
-            </div>
+            <AccountChip G={G} t={t} />
           </div>
         </div>
 
@@ -1922,117 +1945,30 @@ export default function App() {
       <div style={{ maxWidth: 980, margin: "0 auto", padding: "28px 16px" }}>
 
         {/* Election */}
-        {tab === "election" && <div>
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 22, flexWrap: "wrap", gap: 12 }}>
-            <div>
-              <div style={{ fontFamily: "'Syne',sans-serif", fontWeight: 800, fontSize: 26, color: G.text }}>Official Election Ballot</div>
-              <div style={{ fontSize: 13, color: G.textMid, marginTop: 3 }}>June 7, 2026 — California General Election · Requires <strong style={{ color: G.gold }}>Tier 2 Verification</strong></div>
-            </div>
-            <div style={{ background: G.blueDim, border: `1px solid ${G.blue}33`, borderRadius: 10, padding: "10px 14px", fontSize: 12, color: G.blue, maxWidth: 300, lineHeight: 1.6 }}>
-              🔐 Official elections require government ID, SSN cross-check, facial recognition, and SMS MFA.
-            </div>
-          </div>
-          {!currentVoter && <Card G={G} style={{ textAlign: "center", padding: 36, marginBottom: 20 }}>
-            <div style={{ fontSize: 36, marginBottom: 12 }}>🗳</div>
-            <div style={{ fontFamily: "'Syne',sans-serif", fontWeight: 700, fontSize: 18, marginBottom: 8, color: G.text }}>Authentication Required</div>
-            <div style={{ fontSize: 13, color: G.textMid, marginBottom: 20, maxWidth: 380, margin: "0 auto 20px" }}>Sign in with your verified Tier 2 Voter ID to access the official ballot.</div>
-            <div style={{ display: "flex", gap: 12, justifyContent: "center", flexWrap: "wrap" }}>
-              <Btn onClick={() => setSigninOpen(true)}>{t.signIn}</Btn>
-              <Btn variant="outline" onClick={() => setTab("register")}>{t.register} →</Btn>
-            </div>
-          </Card>}
-          {currentVoter && currentVoter.tier !== 2 && <div style={{ background: G.redDim, border: `1px solid ${G.red}44`, borderRadius: 12, padding: 18, marginBottom: 20, fontSize: 13, color: G.red }}>⚠ Official elections require a <strong>Tier 2 verified account</strong>. Your Tier 1 account is valid for community polls only.</div>}
-          {races.map(r => <RaceCard key={r.id} race={r} voter={currentVoter?.tier === 2 ? currentVoter : null} onVote={onElectionVote} G={G} t={t} />)}
-        </div>}
+        {tab === "election" && <CivicTheme G={G}><OfficialElections /></CivicTheme>}
 
         {/* Polls */}
-        {tab === "polls" && <div>
-          <div style={{ fontFamily: "'Syne',sans-serif", fontWeight: 800, fontSize: 26, color: G.text, marginBottom: 4 }}>Community Polls</div>
-          <div style={{ fontSize: 13, color: G.textMid, marginBottom: 22 }}>Open to all registered voters (Tier 1 or Tier 2). Results visible in real-time.</div>
-          {polls.map(p => <PollCard key={p.id} poll={p} voter={currentVoter} onVote={onPollVote} G={G} t={t} />)}
-        </div>}
+        {tab === "polls" && <CivicTheme G={G}><CommunityHub /></CivicTheme>}
 
         {/* Results */}
-        {tab === "results" && <ResultsView races={races} polls={polls} voters={voters} released={released} onRelease={id => { setReleased(r => ({ ...r, [id]: true })); logAudit("RESULTS_RELEASED", `Race=${id}`); showToast("Results released.", "success"); }} auditLog={auditLog} G={G} t={t} />}
+        {tab === "results" && <CivicTheme G={G}><LiveTracker /></CivicTheme>}
 
         {/* Register */}
-        {tab === "register" && <div>
-          <div style={{ fontFamily: "'Syne',sans-serif", fontWeight: 800, fontSize: 26, color: G.text, marginBottom: 4 }}>{t.register}</div>
-          <div style={{ fontSize: 13, color: G.textMid, marginBottom: 22 }}>Choose the tier that matches your voting needs.</div>
-
-          {!regMode && !regSuccess && <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))", gap: 20 }}>
-            <Card G={G} accent={G.blue + "44"}>
-              <div style={{ fontSize: 30, marginBottom: 10 }}>📋</div>
-              <Chip label="Tier 1" color={G.blue} />
-              <div style={{ fontFamily: "'Syne',sans-serif", fontWeight: 700, fontSize: 18, margin: "10px 0 8px", color: G.text }}>{t.tier1Title}</div>
-              <div style={{ fontSize: 13, color: G.textMid, lineHeight: 1.6, marginBottom: 18 }}>Community polls and surveys. Standard verification.</div>
-              <ul style={{ fontSize: 12, color: G.textDim, lineHeight: 1.9, marginLeft: 16, marginBottom: 20 }}>
-                <li>Name, email, date of birth</li><li>Age verification (18+)</li><li>Unique Voter ID</li><li>Strong PIN (8+ chars)</li>
-              </ul>
-              <Btn full onClick={() => { setRegMode("tier1"); onRegisterTier1(); }}>Quick Register</Btn>
-            </Card>
-            <Card G={G} accent={G.gold + "55"}>
-              <div style={{ fontSize: 30, marginBottom: 10 }}>🏛</div>
-              <Chip label="Tier 2" color={G.gold} />
-              <div style={{ fontFamily: "'Syne',sans-serif", fontWeight: 700, fontSize: 18, margin: "10px 0 8px", color: G.text }}>{t.tier2Title}</div>
-              <div style={{ fontSize: 13, color: G.textMid, lineHeight: 1.6, marginBottom: 18 }}>Local, state & federal elections. Full government-grade verification.</div>
-              <ul style={{ fontSize: 12, color: G.textDim, lineHeight: 1.9, marginLeft: 16, marginBottom: 20 }}>
-                <li>Government photo ID (DL / State / Passport)</li><li>Email confirmation</li><li>SSN cross-check with voter rolls</li><li>Registered address verification</li><li>SMS multi-factor authentication</li><li>Live facial recognition biometrics</li><li>Cryptographic ballot receipt</li><li>Notification preferences</li>
-              </ul>
-              <Btn full variant="gold" onClick={() => setRegMode("tier2")}>Begin Full Registration →</Btn>
-            </Card>
-          </div>}
-
-          {regMode === "tier2" && !regSuccess && <div>
-            <div style={{ display: "flex", gap: 10, alignItems: "center", marginBottom: 22 }}>
-              <Btn variant="ghost" onClick={() => setRegMode(null)} size="sm">← Back</Btn>
-              <div>
-                <div style={{ fontFamily: "'Syne',sans-serif", fontWeight: 700, fontSize: 18, color: G.text }}>Official Voter Registration</div>
-                <div style={{ fontSize: 12, color: G.textMid }}>7-step government-grade identity verification</div>
-              </div>
-            </div>
-            <Card G={G}><RegWizard onComplete={onRegisterTier2} existingVoters={voters} G={G} t={t} lang={lang} /></Card>
-          </div>}
-
-          {regSuccess && <Card G={G} accent={G.green + "44"} style={{ textAlign: "center", animation: "fadeUp 0.4s ease" }}>
-            <div style={{ fontSize: 44, marginBottom: 14 }}>✅</div>
-            <div style={{ fontFamily: "'Syne',sans-serif", fontWeight: 800, fontSize: 22, color: G.green, marginBottom: 8 }}>{t.registrationSuccess}</div>
-            <div style={{ fontSize: 13, color: G.textMid, marginBottom: 22, maxWidth: 420, margin: "0 auto 22px", lineHeight: 1.6 }}>
-              {regSuccess.tier === 2 ? "Your identity has been verified against government records. You are now eligible to vote in official elections." : "You are registered to participate in community polls."}
-            </div>
-            <div style={{ background: G.bg, border: `1px solid ${G.border2}`, borderRadius: 12, padding: 20, maxWidth: 420, margin: "0 auto 22px", textAlign: "left" }}>
-              {[["Voter ID", <span style={{ fontFamily: "monospace", color: G.gold, fontWeight: 700 }}>{regSuccess.id}</span>], ["PIN", regSuccess.tier === 1 ? regSuccess.pin : "(your chosen PIN)"], ["Tier", regSuccess.tier === 2 ? "🏛 Official Elections" : "📋 Community Polls"]].map(([k, v]) => (
-                <div key={k} style={{ display: "flex", justifyContent: "space-between", padding: "7px 0", borderBottom: `1px solid ${G.border}`, fontSize: 13, gap: 12 }}>
-                  <span style={{ color: G.textDim }}>{k}</span><span style={{ color: G.text }}>{v}</span>
-                </div>
-              ))}
-              {regSuccess.tier === 2 && <div style={{ padding: "10px 0" }}>
-                <div style={{ fontSize: 11, color: G.textDim, marginBottom: 4 }}>Ballot Receipt Hash</div>
-                <div style={{ fontFamily: "monospace", fontSize: 10, color: G.green, wordBreak: "break-all", lineHeight: 1.6 }}>{regSuccess.receiptHash}</div>
-              </div>}
-            </div>
-            <div style={{ display: "flex", gap: 10, justifyContent: "center", flexWrap: "wrap" }}>
-              <Btn onClick={() => { setRegSuccess(null); setRegMode(null); setTab(regSuccess.tier === 2 ? "election" : "polls"); }}>{regSuccess.tier === 2 ? "Go to Ballot →" : "Go to Polls →"}</Btn>
-              <Btn variant="outline" onClick={() => { setRegSuccess(null); setRegMode(null); }}>Register Another</Btn>
-            </div>
-          </Card>}
-        </div>}
+        {tab === "register" && <CivicTheme G={G}><VerificationWizard /></CivicTheme>}
 
         {/* Civic Transparency */}
         {tab === "civic" && <CivicTab G={G} />}
 
         {/* Admin */}
-        {tab === "admin" && <AdminPanel races={races} voters={voters} polls={polls}
-          onToggleRace={id => { setRaces(rs => rs.map(r => r.id === id ? { ...r, open: !r.open } : r)); logAudit("RACE_TOGGLED", `id=${id}`); }}
-          onDeleteRace={id => { setRaces(rs => rs.filter(r => r.id !== id)); logAudit("RACE_DELETED", `id=${id}`); }}
-          onUpdateReleaseTime={(id, time) => { setRaces(rs => rs.map(r => r.id === id ? { ...r, releaseTime: time } : r)); logAudit("RELEASE_TIME_SET", `Race=${id}, Time=${time}`); showToast("Release time updated.", "success"); }}
-          onUpdateMethod={onUpdateMethod}
-          onUpdateSeats={onUpdateSeats}
-          onCreatePoll={p => { setPolls(ps => [...ps, p]); showToast("Poll created!", "success"); logAudit("POLL_CREATED", p.title); }}
-          G={G} t={t} />}
+        {tab === "admin" && isAdmin && <CivicTheme G={G}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, marginBottom: 12 }}>
+            <div style={{ fontFamily: "'Syne',sans-serif", fontWeight: 800, fontSize: 24, color: G.text }}>Admin</div>
+            <Btn onClick={adminSignOut} variant="outline" size="sm">Sign out</Btn>
+          </div>
+          <AdminConsole />
+        </CivicTheme>}
       </div>
 
-      <SignInModal open={signinOpen} onClose={() => setSigninOpen(false)} voters={voters} onSignIn={v => { setCurrentVoter(v); showToast(`${t.welcomeBack} ${v.name.split(" ")[0]}!`, "success"); }} G={G} t={t} />
       <Toast msg={toast.msg} type={toast.type} G={G} />
     </div>
   );
