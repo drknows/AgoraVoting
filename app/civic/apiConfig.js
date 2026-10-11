@@ -168,6 +168,22 @@ export async function fetchOpenStates(path, params = {}) {
   return res.json();
 }
 
+/**
+ * Server-proxied civic data (see app/api/civic/route.js).
+ *   src: "congress" | "senate" | "openstates" | "legistar"
+ * Keys are added on the server, so these work without exposing them.
+ */
+export async function fetchCivic(src, path = "", params = {}) {
+  const qs = new URLSearchParams({ src, ...(path ? { path } : {}) });
+  Object.entries(params).forEach(([k, v]) => {
+    if (v !== undefined && v !== null && v !== "") qs.append(k, String(v));
+  });
+  const res = await fetch(`/api/civic?${qs}`);
+  const body = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(body.error || `Request failed (${res.status})`);
+  return body;
+}
+
 /** Simple in-memory cache to avoid re-fetching within a session */
 const _cache = new Map();
 export async function cachedFetch(key, fetcher, ttlMs = 5 * 60 * 1000) {
