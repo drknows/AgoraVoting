@@ -298,12 +298,12 @@ export function VotingRecords() {
 /* ─────────────────────────────────────────────────────────────────
    LEGISLATION TRACKER — Congress.gov
 ───────────────────────────────────────────────────────────────── */
-const BILL_URL_TYPE = {
+export const BILL_URL_TYPE = {
   HR:"house-bill", S:"senate-bill", HRES:"house-resolution", SRES:"senate-resolution",
   HJRES:"house-joint-resolution", SJRES:"senate-joint-resolution",
   HCONRES:"house-concurrent-resolution", SCONRES:"senate-concurrent-resolution",
 };
-const BILL_LABEL = {
+export const BILL_LABEL = {
   HR:"H.R.", S:"S.", HRES:"H.Res.", SRES:"S.Res.", HJRES:"H.J.Res.",
   SJRES:"S.J.Res.", HCONRES:"H.Con.Res.", SCONRES:"S.Con.Res.",
 };
@@ -676,7 +676,7 @@ export function StateVotes() {
 /* ─────────────────────────────────────────────────────────────────
    LOCAL VOTES — city councils & county boards via Legistar
 ───────────────────────────────────────────────────────────────── */
-const LEGISTAR_PRESETS = [
+export const LEGISTAR_PRESETS = [
   { v:"chicago",     label:"Chicago, IL — City Council" },
   { v:"seattle",     label:"Seattle, WA — City Council" },
   { v:"sfgov",       label:"San Francisco, CA — Board of Supervisors" },
@@ -696,13 +696,13 @@ function LocalMeetingItems({ client, eventId }) {
   const [openItem, setOpenItem] = useState(null);
   const { data, loading, error } = useApiData(
     () => cachedFetch(`lg-items-${client}-${eventId}`, () =>
-      fetchCivic("legistar", `/events/${eventId}/eventitems`, { AgendaNote: 1, MinutesNote: 1 })),
+      fetchCivic("legistar", `/events/${eventId}/eventitems`, { client, AgendaNote: 1, MinutesNote: 1 })),
     [client, eventId]
   );
   const items = (data || []).filter(i => i.EventItemActionName || i.EventItemPassedFlagName);
   const votes = useApiData(
     () => openItem ? cachedFetch(`lg-votes-${client}-${openItem}`, () =>
-      fetchCivic("legistar", `/eventitems/${openItem}/votes`)) : Promise.resolve(null),
+      fetchCivic("legistar", `/eventitems/${openItem}/votes`, { client })) : Promise.resolve(null),
     [client, openItem]
   );
 
@@ -764,6 +764,7 @@ export function LocalVotes() {
   const { data, loading, error } = useApiData(
     () => cachedFetch(`lg-events-${client}`, () =>
       fetchCivic("legistar", "/events", {
+        client,
         "$filter": `EventDate ge datetime'${isoDay(-120)}' and EventDate lt datetime'${isoDay(1)}'`,
         "$orderby": "EventDate desc",
         "$top": 30,

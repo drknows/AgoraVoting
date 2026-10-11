@@ -145,6 +145,118 @@ async function senate(searchParams) {
   return json({ error: "Unknown Senate request" }, 400);
 }
 
+/* ── DOJ press releases (no key; no server-side search, so we filter) ── */
+const stripHtml = (s = "") =>
+  decode(String(s).replace(/<[^>]+>/g, " ").replace(/&nbsp;/g, " ")).replace(/\s+/g, " ");
+
+// Words that indicate the defendant held public office or a government job.
+const OFFICIAL_TERMS = [
+  "public corruption", "public official", "elected official", "government official",
+  "former mayor", "mayor", "city council", "councilman", "councilwoman", "council member",
+  "county commissioner", "commissioner", "state senator", "state representative",
+  "assemblyman", "assemblywoman", "legislator", "congressman", "congresswoman",
+  "member of congress", "sheriff", "police chief", "judge", "alderman", "township",
+  "school board", "superintendent", "city manager", "county executive", "governor",
+  "federal employee", "state employee", "bribery", "bribe", "kickback", "honest services",
+  "extortion under color", "embezzle",
+];
+
+async function doj(searchParams) {
+  const q = (searchParams.get("q") || "").trim().toLowerCase().slice(0, 80);
+  const officialsOnly = searchParams.get("officials") !== "0";
+  const pages = Math.min(Number(searchParams.get("pages")) || 4, 6);
+  const headers = {
+    "user-agent":
+      "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36",
+    accept: "application/json, text/javascript, */*; q=0.01",
+    "x-requested-with": "XMLHttpRequest",
+    referer: "https://www.justice.gov/",
+  };
+  const results = await Promise.all(
+    Array.from({ length: pages }, (_, i) =>
+      fetch(
+        `https://www.justice.gov/api/v1/press_releases.json?pagesize=50&sort=date&direction=DESC&page=${i}`,
+        { headers, cache: "no-store" }
+      )
+        .then((r) => (r.ok ? r.json() : { results: [] }))
+        .catch(() => ({ results: [] }))
+    )
+  );
+  const seen = new Set();
+  const items = [];
+  for (const page of results) {
+    for (const r of page.results || []) {
+      if (!r || seen.has(r.url)) continue;
+      seen.add(r.url);
+      const title = stripHtml(r.title);
+      const teaser = stripHtml(r.teaser || "").slice(0, 400);
+      const body = stripHtml(r.body || "").slice(0, 4000);
+      const hay = `${title} ${teaser} ${body}`.toLowerCase();
+      if (officialsOnly && !OFFICIAL_TERMS.some((t) => hay.includes(t))) continue;
+      if (q && !hay.includes(q)) continue;
+      const stage = /sentenced/i.test(title) ? "Sentenced"
+        : /convicted|found guilty|jury verdict/i.test(title) ? "Convicted"
+        : /pleads? guilty|plea/i.test(title) ? "Pleaded guilty"
+        : /indicted|indictment/i.test(title) ? "Indicted"
+        : /charged|charges|complaint|arrested/i.test(title) ? "Charged"
+        : "Update";
+      items.push({
+        title,
+        summary: teaser || body.slice(0, 300),
+        date: r.date ? new Date(Number(r.date) * 1000).toISOString().slice(0, 10) : null,
+        url: r.url && r.url.startsWith("http") ? r.url : `https://www.justice.gov${r.url || ""}`,
+        office: (Array.isArray(r.component) ? r.component : [r.component])
+          .map((c) => c?.name).filter(Boolean).join(", "),
+        topics: (Array.isArray(r.topic) ? r.topic : [r.topic]).map((t) => t?.name).filter(Boolean),
+        stage,
+      });
+    }
+  }
+  if (!results.some((p) => (p.results || []).length))
+    return json({ error: "Justice Department API did not respond" }, 502);
+  return json({ items, scanned: seen.size }, 200, 1800);
+}
+
+/* ── Google Fact Check Tools ────────────────────────────────────── */
+async function factcheck(searchParams) {
+  const key =
+    process.env.GOOGLE_FACTCHECK_API_KEY ||
+    process.env.NEXT_PUBLIC_GOOGLE_FACTCHECK_API_KEY || "";
+  if (!isReal(key)) return json({ error: "Google Fact Check API key not configured" }, 400);
+  const qs = new URLSearchParams({
+    query: (searchParams.get("q") || "Congress").slice(0, 120),
+    languageCode: "en-US",
+    pageSize: "25",
+    key,
+  });
+  const age = searchParams.get("maxAgeDays");
+  if (/^\d{1,4}$/.test(age || "")) qs.set("maxAgeDays", age);
+  const res = await upstream(`https://factchecktools.googleapis.com/v1alpha1/claims:search?${qs}`);
+  const body = await res.json().catch(() => ({}));
+  if (!res.ok) return json({ error: `Fact Check API ${res.status}: ${body?.error?.message || ""}`.trim() }, 502);
+  return json({ claims: body.claims || [] }, 200, 1800);
+}
+
+/* ── Report feeds (RSS) ─────────────────────────────────────────── */
+const FEEDS = {
+  cbo: "https://www.cbo.gov/publications/all/rss.xml",
+  gao: "https://www.gao.gov/rss/reports.xml",
+};
+async function rss(searchParams) {
+  const feed = searchParams.get("feed");
+  if (!FEEDS[feed]) return json({ error: "Unknown feed" }, 400);
+  const res = await upstream(FEEDS[feed], { headers: { accept: "application/rss+xml, application/xml, text/xml" } });
+  if (!res.ok) return json({ error: `${feed.toUpperCase()} feed ${res.status}` }, 502);
+  const xml = await res.text();
+  const items = blocks(xml, "item").slice(0, 30).map((it) => ({
+    title: stripHtml(tag(it, "title") || ""),
+    url: (tag(it, "link") || "").trim(),
+    date: tag(it, "pubDate") ? new Date(tag(it, "pubDate")).toISOString().slice(0, 10) : null,
+    summary: stripHtml(tag(it, "description") || "").slice(0, 400),
+  }));
+  return json({ items }, 200, 3600);
+}
+
 /* ── Handler ────────────────────────────────────────────────────── */
 export async function GET(request) {
   const { searchParams } = new URL(request.url);
@@ -153,6 +265,9 @@ export async function GET(request) {
 
   try {
     if (src === "senate") return await senate(searchParams);
+    if (src === "doj") return await doj(searchParams);
+    if (src === "factcheck") return await factcheck(searchParams);
+    if (src === "rss") return await rss(searchParams);
 
     if (path && (!SAFE_PATH.test(path) || path.includes("..")))
       return json({ error: "Invalid path" }, 400);

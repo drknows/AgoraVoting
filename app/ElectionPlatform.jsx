@@ -9,6 +9,8 @@ import { CivicTheme } from "./civic/ui";
 import {
   VotingRecords, RecentVotes, MemberSearch, LegislationTracker, StateVotes, LocalVotes,
 } from "./civic/VoteSections";
+import { Crowdsource, ExpertAnalysis, Meetings, Arrests, EthicsFactCheck } from "./civic/PhaseTwoSections";
+import { LegislationReview } from "./civic/LegislationReview";
 
 /* ═══════════════════════════════════════════════════════════════
    AGORA ELECTION PLATFORM v2.0
@@ -1686,6 +1688,7 @@ function CivicComingSoon({ label, description, G }) {
 
 // ── Main Civic Tab shell ──────────────────────────────────────────
 const CIVIC_TABS = [
+  { id:"review",      label:"📜 Legislation Review", live:true, desc:"Summaries of new federal, state, county and city legislation, linked to the full official record." },
   { id:"votes",       label:"🗳 Congress Votes",   live:true,  desc:"Pick a state to see its members of Congress and how each voted on the latest roll calls." },
   { id:"recent",      label:"🏛 Recent Roll Calls", live:true, desc:"Latest Senate and House roll-call votes, with how every member voted." },
   { id:"state",       label:"🏢 State Votes",      live:true,  desc:"Roll-call votes in all 50 state legislatures, via OpenStates." },
@@ -1695,15 +1698,15 @@ const CIVIC_TABS = [
   { id:"fundraising", label:"💰 Fundraising",      live:true,  desc:"Campaign finance data from the FEC." },
   { id:"donors",      label:"📈 Donor Lookup",     live:true,  desc:"See who is funding which candidates." },
   { id:"lobbying",    label:"🤝 Lobbying",         live:true,  desc:"Senate LDA lobbying disclosures — no key needed." },
-  { id:"crowdsource", label:"🗣 Crowdsource",      live:false, desc:"Community-sourced legislation ideas, debate, and petitions. Launching Phase 2." },
-  { id:"experts",     label:"🎓 Expert Analysis",  live:false, desc:"Policy experts, academics, and journalists weigh in on legislation. Launching Phase 2." },
-  { id:"arrests",     label:"🔒 Arrests",          live:false, desc:"Public records of arrests and indictments of government officials. Launching Phase 2." },
-  { id:"ethics",      label:"⚖️ Ethics & Fact-Check", live:false, desc:"Tracking false statements, ethics violations, and sociopathic behavior in office. Launching Phase 2." },
-  { id:"meetings",    label:"📅 Meetings",         live:false, desc:"Public official meetings, schedules, and potential conflicts of interest. Launching Phase 2." },
+  { id:"crowdsource", label:"🗣 Crowdsource",      live:true,  desc:"Propose laws, vote ideas up or down, and debate them with fellow citizens." },
+  { id:"experts",     label:"🎓 Expert Analysis",  live:true,  desc:"Nonpartisan analysis from the Congressional Research Service, CBO and GAO." },
+  { id:"arrests",     label:"🔒 Arrests",          live:true,  desc:"Public officials charged, convicted or sentenced, from Justice Department records." },
+  { id:"ethics",      label:"⚖️ Ethics & Fact-Check", live:true, desc:"Independent fact checks of public statements, plus official ethics and oversight records." },
+  { id:"meetings",    label:"📅 Meetings",         live:true,  desc:"Congressional committee meetings and hearings — upcoming and recent." },
 ];
 
 function CivicTab({ G }) {
-  const [activeTab, setActiveTab] = useState("votes");
+  const [activeTab, setActiveTab] = useState("review");
   const tab = CIVIC_TABS.find(t => t.id === activeTab);
 
   return (
@@ -1747,19 +1750,20 @@ function CivicTab({ G }) {
           {activeTab==="local"     && <LocalVotes />}
           {activeTab==="member"    && <MemberSearch />}
           {activeTab==="bills"     && <LegislationTracker />}
+          {activeTab==="review"    && <LegislationReview />}
+          {activeTab==="crowdsource" && <Crowdsource />}
+          {activeTab==="experts"   && <ExpertAnalysis />}
+          {activeTab==="arrests"   && <Arrests />}
+          {activeTab==="ethics"    && <EthicsFactCheck />}
+          {activeTab==="meetings"  && <Meetings />}
         </CivicTheme>
         {activeTab==="fundraising" && <CivicFundraising G={G} />}
         {activeTab==="donors"      && <CivicDonors G={G} />}
         {activeTab==="lobbying"    && <CivicLobbying G={G} />}
-        {activeTab==="crowdsource" && <CivicComingSoon label="Crowdsource Democracy" description="A platform to crowdsource legislation ideas, identify needed laws, and debate proposed bills with fellow citizens." G={G} />}
-        {activeTab==="experts"     && <CivicComingSoon label="Expert Analysis" description="Policy experts, academics, and journalists providing public analysis on legislation through writing, video, and public forums." G={G} />}
-        {activeTab==="arrests"     && <CivicComingSoon label="Arrests & Indictments" description="Public records tracking arrests, indictments, and criminal proceedings involving government officials." G={G} />}
-        {activeTab==="ethics"      && <CivicComingSoon label="Ethics & Fact-Check" description="Tracking false statements, ethics violations, and patterns of sociopathic behavior in public office." G={G} />}
-        {activeTab==="meetings"    && <CivicComingSoon label="Meetings Tracker" description="Public official schedules, disclosed meetings, and analysis of potential conflicts of interest." G={G} />}
       </div>
 
       <div style={{fontSize:11,color:G.textDim,marginTop:12,textAlign:"center"}}>
-        Data sources: Congress.gov · Senate.gov · OpenStates · Legistar · FEC API · Senate LDA · All public government records.
+        Data sources: Congress.gov · Senate.gov · OpenStates · Legistar · FEC · Senate LDA · U.S. DOJ · CBO · GAO · Google Fact Check · All public records.
       </div>
     </div>
   );

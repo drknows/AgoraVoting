@@ -8,6 +8,8 @@ import {
 import {
   VotingRecords, RecentVotes, MemberSearch, LegislationTracker, StateVotes, LocalVotes,
 } from "./VoteSections";
+import { Crowdsource, ExpertAnalysis, Meetings, Arrests, EthicsFactCheck } from "./PhaseTwoSections";
+import { LegislationReview } from "./LegislationReview";
 
 /* ─────────────────────────────────────────────────────────────────
    FUNDRAISING — FEC API
@@ -276,6 +278,7 @@ function InvestmentsPanel() {
    MAIN PLATFORM SHELL
 ───────────────────────────────────────────────────────────────── */
 const TABS = [
+  { id:"review",     label:"📜 Legislation Review", live:true },
   { id:"votes",      label:"🗳 Congress Votes",    live:true  },
   { id:"recent",     label:"🏛 Recent Roll Calls", live:true  },
   { id:"state",      label:"🏢 State Votes",       live:true  },
@@ -285,14 +288,15 @@ const TABS = [
   { id:"fundraising",label:"💰 Fundraising",       live:true  },
   { id:"donors",     label:"📈 Donor Lookup",      live:true  },
   { id:"lobbying",   label:"🤝 Lobbying",          live:true  },
-  { id:"crowdsource",label:"🗣 Crowdsource",       live:false },
-  { id:"experts",    label:"🎓 Expert Analysis",   live:false },
-  { id:"arrests",    label:"🔒 Arrests",           live:false },
-  { id:"ethics",     label:"⚖️ Ethics",            live:false },
+  { id:"crowdsource",label:"🗣 Crowdsource",       live:true  },
+  { id:"experts",    label:"🎓 Expert Analysis",   live:true  },
+  { id:"arrests",    label:"🔒 Arrests",           live:true  },
+  { id:"ethics",     label:"⚖️ Ethics & Fact-Check", live:true },
+  { id:"meetings",   label:"📅 Meetings",          live:true  },
 ];
 
 export default function CivicPlatform() {
-  const [activeTab, setActiveTab] = useState("votes");
+  const [activeTab, setActiveTab] = useState("review");
 
   const tab = TABS.find(t => t.id === activeTab);
 
@@ -390,6 +394,12 @@ export default function CivicPlatform() {
           {activeTab === "fundraising" && <Fundraising />}
           {activeTab === "donors"      && <InvestmentsPanel />}
           {activeTab === "lobbying"    && <LobbyingTracker />}
+          {activeTab === "review"      && <LegislationReview />}
+          {activeTab === "crowdsource" && <Crowdsource />}
+          {activeTab === "experts"     && <ExpertAnalysis />}
+          {activeTab === "arrests"     && <Arrests />}
+          {activeTab === "ethics"      && <EthicsFactCheck />}
+          {activeTab === "meetings"    && <Meetings />}
 
           {!tab?.live && (
             <div style={{padding:"24px 0",textAlign:"center",color:"#888"}}>
@@ -402,7 +412,7 @@ export default function CivicPlatform() {
         </div>
 
         <div style={{fontSize:11,color:"#999",marginTop:12,textAlign:"center"}}>
-          Data sources: Congress.gov · Senate.gov · OpenStates · Legistar · FEC API · Senate LDA · All public records.
+          Data sources: Congress.gov · Senate.gov · OpenStates · Legistar · FEC · Senate LDA · U.S. DOJ · CBO · GAO · Google Fact Check · All public records.
           <br/>Anti-Sociopath Society is a nonpartisan civic transparency platform.
         </div>
       </div>
