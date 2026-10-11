@@ -1,6 +1,14 @@
 "use client";
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, useCallback } from "react";
 import { VOTING_METHODS, METHOD_CATEGORIES, tallyVotes } from "./VotingMethods";
+import {
+  fetchFEC, fetchLDA,
+  cachedFetch, API_KEYS
+} from "./apiConfig";
+import { CivicTheme } from "./civic/ui";
+import {
+  VotingRecords, RecentVotes, MemberSearch, LegislationTracker, StateVotes, LocalVotes,
+} from "./civic/VoteSections";
 
 /* ═══════════════════════════════════════════════════════════════
    AGORA ELECTION PLATFORM v2.0
@@ -1432,12 +1440,338 @@ function LangPicker({ lang, setLang, G }) {
   );
 }
 
+// ─── Civic Platform ───────────────────────────────────────────────
+
+function useApiData(fetcher, deps = []) {
+  const [data, setData] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true); setError(null);
+    fetcher()
+      .then(d => { if (!cancelled) { setData(d); setLoading(false); } })
+      .catch(e => { if (!cancelled) { setError(e.message); setLoading(false); } });
+    return () => { cancelled = true; };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, deps);
+  return { data, loading, error };
+}
+
+function ApiStatus({ loading, error, count, G }) {
+  const s = { display:"inline-flex", alignItems:"center", gap:4, padding:"3px 9px", borderRadius:99, fontSize:11, fontWeight:700, border:"1px solid" };
+  if (loading) return <span style={{...s, background: G.surface2, color: G.textDim, borderColor: G.border2}}>⏳ Loading…</span>;
+  if (error)   return <span style={{...s, background: G.redDim, color: G.red, borderColor: G.red+"44"}} title={error}>⚠ {error.includes("not configured") ? "API key needed" : "API error"}</span>;
+  if (count != null) return <span style={{...s, background: G.greenDim, color: G.green, borderColor: G.green+"44"}}>✓ {count} records</span>;
+  return <span style={{...s, background: G.greenDim, color: G.green, borderColor: G.green+"44"}}>✓ Live</span>;
+}
+
+function CivicKeyBanner({ name, url, G }) {
+  return (
+    <div style={{background: G.surface2, border:`1px solid ${G.gold}55`, borderRadius:8, padding:"10px 14px", marginBottom:12, fontSize:13, color: G.text}}>
+      <strong style={{color: G.gold}}>🔑 API key needed:</strong> {name} —{" "}
+      <a href={url} target="_blank" rel="noreferrer" style={{color: G.blue}}>Register free →</a>
+      {" "}then add to <code style={{color: G.purple}}>.env.local</code>
+    </div>
+  );
+}
+
+const civicInputStyle = (G) => ({
+  padding:"7px 11px", border:`1px solid ${G.border2}`, borderRadius:7,
+  fontSize:13, background: G.bg, color: G.text, outline:"none", fontFamily:"inherit",
+});
+const civicBtnStyle = (G) => ({
+  padding:"7px 14px", borderRadius:7, border:`1px solid ${G.blue}`,
+  background: G.blue, color:"#fff", cursor:"pointer", fontSize:13, fontWeight:600, fontFamily:"inherit",
+});
+const civicTableStyle = { width:"100%", borderCollapse:"collapse", fontSize:13 };
+const CivicTh = ({children, G, ...p}) => (
+  <th style={{padding:"7px 10px",textAlign:"left",fontSize:11,fontWeight:700,letterSpacing:".04em",textTransform:"uppercase",color: G?.textDim,...(p.style||{})}}>{children}</th>
+);
+const CivicTd = ({children, ...p}) => (
+  <td style={{padding:"8px 10px",verticalAlign:"top",borderBottom:"1px solid #eee",...(p.style||{})}}>{children}</td>
+);
+function civicPartyBadge(party) {
+  const map = { D:{bg:"#dbeafe",c:"#1d4ed8"}, R:{bg:"#fee2e2",c:"#b91c1c"}, I:{bg:"#f3e8ff",c:"#7e22ce"} };
+  const s = map[party?.[0]] || {bg:"#f3f4f6",c:"#374151"};
+  return {display:"inline-block",padding:"1px 7px",borderRadius:99,fontSize:11,fontWeight:700,background:s.bg,color:s.c};
+}
+function civicFmt$(n) { if (n==null) return "—"; return "$"+Number(n).toLocaleString("en-US",{maximumFractionDigits:0}); }
+function civicVoteBadge(pos) {
+  if (!pos) return {};
+  const p = pos.toLowerCase();
+  if (p==="yes"||p==="yea") return {display:"inline-block",padding:"1px 7px",borderRadius:99,fontSize:11,fontWeight:700,background:"#edf7f1",color:"#1a7a4a"};
+  if (p==="no"||p==="nay")  return {display:"inline-block",padding:"1px 7px",borderRadius:99,fontSize:11,fontWeight:700,background:"#fdf0ee",color:"#c0392b"};
+  return {display:"inline-block",padding:"1px 7px",borderRadius:99,fontSize:11,fontWeight:700,background:"#f0f0f0",color:"#888"};
+}
+function civicRiskBadge(level) {
+  return { high:{display:"inline-block",padding:"2px 7px",borderRadius:5,fontSize:11,fontWeight:700,background:"#fdf0ee",color:"#c0392b"},
+           med: {display:"inline-block",padding:"2px 7px",borderRadius:5,fontSize:11,fontWeight:700,background:"#fef9ee",color:"#b45309"},
+           low: {display:"inline-block",padding:"2px 7px",borderRadius:5,fontSize:11,fontWeight:700,background:"#edf7f1",color:"#1a7a4a"} }[level];
+}
+const US_STATES = [
+  {code:"AL",name:"Alabama"},{code:"AK",name:"Alaska"},{code:"AZ",name:"Arizona"},{code:"AR",name:"Arkansas"},
+  {code:"CA",name:"California"},{code:"CO",name:"Colorado"},{code:"CT",name:"Connecticut"},{code:"DE",name:"Delaware"},
+  {code:"FL",name:"Florida"},{code:"GA",name:"Georgia"},{code:"HI",name:"Hawaii"},{code:"ID",name:"Idaho"},
+  {code:"IL",name:"Illinois"},{code:"IN",name:"Indiana"},{code:"IA",name:"Iowa"},{code:"KS",name:"Kansas"},
+  {code:"KY",name:"Kentucky"},{code:"LA",name:"Louisiana"},{code:"ME",name:"Maine"},{code:"MD",name:"Maryland"},
+  {code:"MA",name:"Massachusetts"},{code:"MI",name:"Michigan"},{code:"MN",name:"Minnesota"},{code:"MS",name:"Mississippi"},
+  {code:"MO",name:"Missouri"},{code:"MT",name:"Montana"},{code:"NE",name:"Nebraska"},{code:"NV",name:"Nevada"},
+  {code:"NH",name:"New Hampshire"},{code:"NJ",name:"New Jersey"},{code:"NM",name:"New Mexico"},{code:"NY",name:"New York"},
+  {code:"NC",name:"North Carolina"},{code:"ND",name:"North Dakota"},{code:"OH",name:"Ohio"},{code:"OK",name:"Oklahoma"},
+  {code:"OR",name:"Oregon"},{code:"PA",name:"Pennsylvania"},{code:"RI",name:"Rhode Island"},{code:"SC",name:"South Carolina"},
+  {code:"SD",name:"South Dakota"},{code:"TN",name:"Tennessee"},{code:"TX",name:"Texas"},{code:"UT",name:"Utah"},
+  {code:"VT",name:"Vermont"},{code:"VA",name:"Virginia"},{code:"WA",name:"Washington"},{code:"WV",name:"West Virginia"},
+  {code:"WI",name:"Wisconsin"},{code:"WY",name:"Wyoming"},
+];
+
+// Civic: Voting Records
+function CivicFundraising({ G }) {
+  const [office, setOffice] = useState("S");
+  const [cycleYear, setCycleYear] = useState("2026");
+  const [search, setSearch] = useState("");
+  const [query, setQuery] = useState({office:"S",cycle:"2026",name:""});
+  const { data, loading, error } = useApiData(
+    () => cachedFetch(`fec-${query.office}-${query.cycle}-${query.name}`, () =>
+      fetchFEC("/candidates/totals/", {office:query.office,election_year:query.cycle,...(query.name?{name:query.name.toUpperCase()}:{}),per_page:20,sort:"-receipts",is_active_candidate:true})
+    ), [query]
+  );
+  const candidates = data?.results || [];
+  return (
+    <div>
+      {API_KEYS.FEC==="DEMO_KEY" && <div style={{background:G.surface2,border:`1px solid ${G.gold}55`,borderRadius:8,padding:"10px 14px",marginBottom:12,fontSize:13,color:G.text}}>ℹ️ Using FEC DEMO_KEY (1,000 req/day). <a href="https://api.open.fec.gov/developers/" target="_blank" rel="noreferrer" style={{color:G.blue}}>Get free key →</a></div>}
+      <div style={{display:"flex",gap:8,marginBottom:12,flexWrap:"wrap",alignItems:"center"}}>
+        <input value={search} onChange={e=>setSearch(e.target.value)} placeholder="Search by name…" style={{...civicInputStyle(G),minWidth:180}} onKeyDown={e=>e.key==="Enter"&&setQuery({office,cycle:cycleYear,name:search})} />
+        <select value={office} onChange={e=>setOffice(e.target.value)} style={civicInputStyle(G)}><option value="S">Senate</option><option value="H">House</option><option value="P">President</option></select>
+        <select value={cycleYear} onChange={e=>setCycleYear(e.target.value)} style={civicInputStyle(G)}>{["2026","2024","2022","2020"].map(y=><option key={y}>{y}</option>)}</select>
+        <button onClick={()=>setQuery({office,cycle:cycleYear,name:search})} style={civicBtnStyle(G)}>Search</button>
+        <ApiStatus loading={loading} error={error} count={data?.pagination?.count} G={G} />
+      </div>
+      {!loading && !error && candidates.length>0 && (
+        <div style={{overflowX:"auto"}}><table style={civicTableStyle}><thead><tr style={{background:G.surface2}}>
+          <CivicTh G={G}>#</CivicTh><CivicTh G={G}>Candidate</CivicTh><CivicTh G={G}>Party</CivicTh><CivicTh G={G}>State</CivicTh><CivicTh G={G}>Raised</CivicTh><CivicTh G={G}>Spent</CivicTh><CivicTh G={G}>Cash on Hand</CivicTh>
+        </tr></thead><tbody>
+          {candidates.map((c,i)=>(
+            <tr key={c.candidate_id}>
+              <CivicTd style={{fontWeight:700,color:G.textDim}}>{i+1}</CivicTd>
+              <CivicTd style={{color:G.text}}><strong>{c.name}</strong><div style={{fontSize:11,color:G.textDim}}>{c.office_full}</div></CivicTd>
+              <CivicTd><span style={civicPartyBadge(c.party)}>{c.party}</span></CivicTd>
+              <CivicTd style={{color:G.textDim}}>{c.state||"—"}</CivicTd>
+              <CivicTd style={{fontWeight:700,color:G.green}}>{civicFmt$(c.receipts)}</CivicTd>
+              <CivicTd style={{color:G.textMid}}>{civicFmt$(c.disbursements)}</CivicTd>
+              <CivicTd style={{fontWeight:600,color:G.text}}>{civicFmt$(c.cash_on_hand_end_period)}</CivicTd>
+            </tr>
+          ))}
+        </tbody></table></div>
+      )}
+    </div>
+  );
+}
+
+// Civic: Donor Lookup
+function CivicDonors({ G }) {
+  const [searchName, setSearchName] = useState("");
+  const [candidates, setCandidates] = useState([]);
+  const [schedA, setSchedA] = useState(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState(null);
+  const searchCandidates = async () => {
+    if (!searchName) return;
+    setLoading(true); setError(null);
+    try { const d = await fetchFEC("/candidates/search/",{name:searchName.toUpperCase(),per_page:10,sort:"-receipts"}); setCandidates(d.results||[]); }
+    catch(e) { setError(e.message); } finally { setLoading(false); }
+  };
+  const loadDonors = async (cid) => {
+    setLoading(true); setError(null);
+    try {
+      const cand = await fetchFEC(`/candidate/${cid}/`,{});
+      const committeeId = cand.results?.[0]?.principal_committees?.[0]?.committee_id;
+      if (!committeeId) throw new Error("No committee found");
+      const donors = await fetchFEC("/schedules/schedule_a/",{committee_id:committeeId,per_page:20,sort:"-contribution_receipt_amount",two_year_transaction_period:2026});
+      setSchedA(donors.results||[]);
+    } catch(e) { setError(e.message); setSchedA([]); } finally { setLoading(false); }
+  };
+  return (
+    <div>
+      {API_KEYS.FEC==="DEMO_KEY" && <div style={{background:G.surface2,border:`1px solid ${G.gold}55`,borderRadius:8,padding:"10px 14px",marginBottom:12,fontSize:13,color:G.text}}>ℹ️ FEC DEMO_KEY active. <a href="https://api.open.fec.gov/developers/" target="_blank" rel="noreferrer" style={{color:G.blue}}>Get free key →</a></div>}
+      <div style={{display:"flex",gap:8,marginBottom:12,flexWrap:"wrap",alignItems:"center"}}>
+        <input value={searchName} onChange={e=>setSearchName(e.target.value)} placeholder="Candidate name (e.g. SMITH)…" style={{...civicInputStyle(G),minWidth:200}} onKeyDown={e=>e.key==="Enter"&&searchCandidates()} />
+        <button onClick={searchCandidates} style={civicBtnStyle(G)}>Find Candidate</button>
+        <ApiStatus loading={loading} error={error} G={G} />
+      </div>
+      {candidates.length>0 && !schedA && (
+        <div>
+          <div style={{fontWeight:700,fontSize:13,marginBottom:6,color:G.text}}>Select candidate to view top donors:</div>
+          <div style={{display:"flex",flexWrap:"wrap",gap:6}}>
+            {candidates.map(c=>(
+              <button key={c.candidate_id} onClick={()=>loadDonors(c.candidate_id)} style={{...civicBtnStyle(G),background:G.surface2,color:G.blue,border:`1px solid ${G.blue}44`,fontSize:12}}>
+                {c.name} ({c.party}) — {c.state} {c.office}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+      {schedA && (
+        <div style={{marginTop:12}}>
+          <div style={{fontWeight:700,fontSize:13,marginBottom:6,color:G.text}}>Top individual contributions:</div>
+          <div style={{overflowX:"auto"}}><table style={civicTableStyle}><thead><tr style={{background:G.surface2}}>
+            <CivicTh G={G}>Donor</CivicTh><CivicTh G={G}>Employer</CivicTh><CivicTh G={G}>Occupation</CivicTh><CivicTh G={G}>City/State</CivicTh><CivicTh G={G}>Amount</CivicTh><CivicTh G={G}>Date</CivicTh>
+          </tr></thead><tbody>
+            {schedA.map((d,i)=>(
+              <tr key={i}>
+                <CivicTd style={{fontWeight:600,fontSize:12,color:G.text}}>{d.contributor_name||"—"}</CivicTd>
+                <CivicTd style={{fontSize:11,color:G.textMid}}>{d.contributor_employer||"—"}</CivicTd>
+                <CivicTd style={{fontSize:11,color:G.textMid}}>{d.contributor_occupation||"—"}</CivicTd>
+                <CivicTd style={{fontSize:11,color:G.textDim}}>{d.contributor_city}, {d.contributor_state}</CivicTd>
+                <CivicTd style={{fontWeight:700,color:G.green}}>{civicFmt$(d.contribution_receipt_amount)}</CivicTd>
+                <CivicTd style={{fontSize:11,color:G.textDim}}>{d.contribution_receipt_date}</CivicTd>
+              </tr>
+            ))}
+          </tbody></table></div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// Civic: Lobbying
+function CivicLobbying({ G }) {
+  const [clientSearch, setClientSearch] = useState("");
+  const [query, setQuery] = useState("pharmaceutical");
+  const { data, loading, error } = useApiData(
+    () => cachedFetch(`lda-${query}`, () => fetchLDA("/filings/",{client_name:query,filing_year:new Date().getFullYear(),per_page:20})),
+    [query]
+  );
+  const filings = data?.results || [];
+  return (
+    <div>
+      <div style={{background:G.greenDim,border:`1px solid ${G.green}44`,borderRadius:8,padding:"10px 14px",marginBottom:12,fontSize:13,color:G.green}}>
+        ✓ No API key required — Senate Lobbying Disclosure Act database is public.
+      </div>
+      <div style={{display:"flex",gap:8,marginBottom:12,flexWrap:"wrap",alignItems:"center"}}>
+        <input value={clientSearch} onChange={e=>setClientSearch(e.target.value)} placeholder="Search by client/company…" style={{...civicInputStyle(G),minWidth:220}} onKeyDown={e=>e.key==="Enter"&&setQuery(clientSearch)} />
+        <button onClick={()=>setQuery(clientSearch)} style={civicBtnStyle(G)}>Search</button>
+        <ApiStatus loading={loading} error={error} count={data?.count} G={G} />
+      </div>
+      {!loading && !error && filings.length>0 && (
+        <div style={{overflowX:"auto"}}><table style={civicTableStyle}><thead><tr style={{background:G.surface2}}>
+          <CivicTh G={G}>Client</CivicTh><CivicTh G={G}>Lobbying Firm</CivicTh><CivicTh G={G}>Period</CivicTh><CivicTh G={G}>Amount</CivicTh><CivicTh G={G}>Issues</CivicTh>
+        </tr></thead><tbody>
+          {filings.map((f,i)=>(
+            <tr key={i}>
+              <CivicTd style={{fontWeight:600,fontSize:12,color:G.text}}>{f.client?.name||"—"}</CivicTd>
+              <CivicTd style={{fontSize:12,color:G.textMid}}>{f.registrant?.name||"—"}</CivicTd>
+              <CivicTd style={{fontSize:11,color:G.textDim}}>{f.period_of_report||`${f.filing_year} ${f.filing_period}`}</CivicTd>
+              <CivicTd style={{fontWeight:700,color:G.gold}}>{f.income?civicFmt$(f.income):f.expenses?civicFmt$(f.expenses):"Disclosed"}</CivicTd>
+              <CivicTd style={{fontSize:11,maxWidth:200,color:G.textMid}}>{f.lobbying_activities?.map(a=>a.general_issue_code_display).filter(Boolean).slice(0,3).join(", ")||"—"}</CivicTd>
+            </tr>
+          ))}
+        </tbody></table></div>
+      )}
+      {!loading && !error && filings.length===0 && <div style={{color:G.textDim,fontSize:13,padding:12}}>No filings found. Try "pharmaceutical", "defense", "energy".</div>}
+    </div>
+  );
+}
+
+// Civic: Phase 2 placeholder
+function CivicComingSoon({ label, description, G }) {
+  return (
+    <div style={{textAlign:"center",padding:"40px 20px"}}>
+      <div style={{fontSize:48,marginBottom:12}}>🏗</div>
+      <div style={{fontFamily:"'Syne',sans-serif",fontWeight:700,fontSize:18,color:G.text,marginBottom:8}}>{label} — Coming in Phase 2</div>
+      <div style={{fontSize:13,color:G.textMid,maxWidth:420,margin:"0 auto",lineHeight:1.7}}>{description}</div>
+    </div>
+  );
+}
+
+// ── Main Civic Tab shell ──────────────────────────────────────────
+const CIVIC_TABS = [
+  { id:"votes",       label:"🗳 Congress Votes",   live:true,  desc:"Pick a state to see its members of Congress and how each voted on the latest roll calls." },
+  { id:"recent",      label:"🏛 Recent Roll Calls", live:true, desc:"Latest Senate and House roll-call votes, with how every member voted." },
+  { id:"state",       label:"🏢 State Votes",      live:true,  desc:"Roll-call votes in all 50 state legislatures, via OpenStates." },
+  { id:"local",       label:"🏙 Local Votes",      live:true,  desc:"City council and county board votes from jurisdictions that publish through Legistar." },
+  { id:"member",      label:"🔍 Member Search",    live:true,  desc:"Look up any member of Congress." },
+  { id:"bills",       label:"📋 Legislation",      live:true,  desc:"Search recently active bills, track status, flag authoritarian risk." },
+  { id:"fundraising", label:"💰 Fundraising",      live:true,  desc:"Campaign finance data from the FEC." },
+  { id:"donors",      label:"📈 Donor Lookup",     live:true,  desc:"See who is funding which candidates." },
+  { id:"lobbying",    label:"🤝 Lobbying",         live:true,  desc:"Senate LDA lobbying disclosures — no key needed." },
+  { id:"crowdsource", label:"🗣 Crowdsource",      live:false, desc:"Community-sourced legislation ideas, debate, and petitions. Launching Phase 2." },
+  { id:"experts",     label:"🎓 Expert Analysis",  live:false, desc:"Policy experts, academics, and journalists weigh in on legislation. Launching Phase 2." },
+  { id:"arrests",     label:"🔒 Arrests",          live:false, desc:"Public records of arrests and indictments of government officials. Launching Phase 2." },
+  { id:"ethics",      label:"⚖️ Ethics & Fact-Check", live:false, desc:"Tracking false statements, ethics violations, and sociopathic behavior in office. Launching Phase 2." },
+  { id:"meetings",    label:"📅 Meetings",         live:false, desc:"Public official meetings, schedules, and potential conflicts of interest. Launching Phase 2." },
+];
+
+function CivicTab({ G }) {
+  const [activeTab, setActiveTab] = useState("votes");
+  const tab = CIVIC_TABS.find(t => t.id === activeTab);
+
+  return (
+    <div>
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:16,flexWrap:"wrap",gap:12}}>
+        <div>
+          <div style={{fontFamily:"'Syne',sans-serif",fontWeight:800,fontSize:26,color:G.text}}>🏛 Civic Transparency</div>
+          <div style={{fontSize:13,color:G.textMid,marginTop:3}}>Live government data — voting records, fundraising, lobbying, legislation, and more.</div>
+        </div>
+        <div style={{display:"flex",alignItems:"center",gap:8}}>
+          <span style={{display:"inline-flex",alignItems:"center",gap:4,padding:"3px 9px",borderRadius:99,fontSize:11,fontWeight:700,background:G.greenDim,color:G.green,border:`1px solid ${G.green}44`}}>🔴 LIVE DATA</span>
+        </div>
+      </div>
+
+      {/* Civic sub-tab bar */}
+      <div style={{background:G.surface,border:`1px solid ${G.border}`,borderRadius:10,padding:"3px 3px",marginBottom:20,display:"flex",flexWrap:"wrap",gap:1}}>
+        {CIVIC_TABS.map(t => (
+          <button key={t.id} onClick={()=>setActiveTab(t.id)}
+            style={{padding:"7px 10px",borderRadius:8,border:activeTab===t.id?`1px solid ${G.border2}`:"1px solid transparent",background:activeTab===t.id?G.surface2:"transparent",color:activeTab===t.id?G.text:G.textDim,cursor:"pointer",fontFamily:"inherit",fontSize:11,fontWeight:600,transition:"all 0.15s",whiteSpace:"nowrap",display:"flex",alignItems:"center",gap:3}}>
+            {t.label}
+            {t.live && <span style={{display:"inline-block",padding:"1px 4px",borderRadius:99,fontSize:9,fontWeight:700,background:G.greenDim,color:G.green,border:`1px solid ${G.green}44`}}>LIVE</span>}
+          </button>
+        ))}
+      </div>
+
+      {/* Section header */}
+      <div style={{background:G.surface,border:`1px solid ${G.border}`,borderRadius:10,padding:"14px 18px",marginBottom:16,display:"flex",alignItems:"center",justifyContent:"space-between",flexWrap:"wrap",gap:8}}>
+        <div>
+          <div style={{fontWeight:700,fontSize:15,color:G.text}}>{tab?.label}</div>
+          <div style={{fontSize:12,color:G.textMid,marginTop:2}}>{tab?.desc}</div>
+        </div>
+        {tab?.live && <span style={{display:"inline-flex",alignItems:"center",gap:4,padding:"3px 9px",borderRadius:99,fontSize:11,fontWeight:700,background:G.greenDim,color:G.green,border:`1px solid ${G.green}44`}}>✓ Live API</span>}
+      </div>
+
+      {/* Content */}
+      <div style={{background:G.surface,border:`1px solid ${G.border}`,borderRadius:10,padding:"16px 18px"}}>
+        <CivicTheme G={G}>
+          {activeTab==="votes"     && <VotingRecords />}
+          {activeTab==="recent"    && <RecentVotes />}
+          {activeTab==="state"     && <StateVotes />}
+          {activeTab==="local"     && <LocalVotes />}
+          {activeTab==="member"    && <MemberSearch />}
+          {activeTab==="bills"     && <LegislationTracker />}
+        </CivicTheme>
+        {activeTab==="fundraising" && <CivicFundraising G={G} />}
+        {activeTab==="donors"      && <CivicDonors G={G} />}
+        {activeTab==="lobbying"    && <CivicLobbying G={G} />}
+        {activeTab==="crowdsource" && <CivicComingSoon label="Crowdsource Democracy" description="A platform to crowdsource legislation ideas, identify needed laws, and debate proposed bills with fellow citizens." G={G} />}
+        {activeTab==="experts"     && <CivicComingSoon label="Expert Analysis" description="Policy experts, academics, and journalists providing public analysis on legislation through writing, video, and public forums." G={G} />}
+        {activeTab==="arrests"     && <CivicComingSoon label="Arrests & Indictments" description="Public records tracking arrests, indictments, and criminal proceedings involving government officials." G={G} />}
+        {activeTab==="ethics"      && <CivicComingSoon label="Ethics & Fact-Check" description="Tracking false statements, ethics violations, and patterns of sociopathic behavior in public office." G={G} />}
+        {activeTab==="meetings"    && <CivicComingSoon label="Meetings Tracker" description="Public official schedules, disclosed meetings, and analysis of potential conflicts of interest." G={G} />}
+      </div>
+
+      <div style={{fontSize:11,color:G.textDim,marginTop:12,textAlign:"center"}}>
+        Data sources: Congress.gov · Senate.gov · OpenStates · Legistar · FEC API · Senate LDA · All public government records.
+      </div>
+    </div>
+  );
+}
+
 // ─── Main App ─────────────────────────────────────────────────────
 const MAIN_TABS = (t) => [
   { id: "election", label: t.officialElection },
   { id: "polls", label: t.communityPolls },
   { id: "results", label: t.resultsAudit },
   { id: "register", label: t.registerTab },
+  { id: "civic", label: "🏛 Civic Transparency" },
   { id: "admin", label: "⚙️ Admin" },
 ];
 
@@ -1679,6 +2013,9 @@ export default function App() {
             </div>
           </Card>}
         </div>}
+
+        {/* Civic Transparency */}
+        {tab === "civic" && <CivicTab G={G} />}
 
         {/* Admin */}
         {tab === "admin" && <AdminPanel races={races} voters={voters} polls={polls}
