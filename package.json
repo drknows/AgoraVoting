@@ -1,19 +1,12 @@
 {
-  "name": "agora-voting-platform",
-  "version": "2.5.1",
+  "name": "agora-society-stands",
+  "version": "1.0.0",
   "private": true,
+  "description": "Agora Society Stands: nonpartisan tracking of what Americans pay for health care and medicine, and who profits.",
+  "type": "module",
+  "engines": { "node": ">=20" },
   "scripts": {
-    "dev": "next dev",
-    "build": "next build",
-    "start": "next start",
-    "lint": "next lint"
-  },
-  "dependencies": {
-    "fflate": "^0.8.3",
-    "next": "14.2.3",
-    "pg": "^8.23.1",
-    "react": "^18",
-    "react-dom": "^18",
-    "unpdf": "^0.12.2"
+    "dev": "node scripts/dev.mjs",
+    "test": "node --test test/*.test.js"
   }
 }

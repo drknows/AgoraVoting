@@ -1,0 +1,22 @@
+{
+  "name": "Agora Society Stands",
+  "short_name": "Agora",
+  "description": "What Americans pay for health care and medicine, and who profits.",
+  "id": "/",
+  "start_url": "/?source=app",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#f0f2f6",
+  "theme_color": "#2a4d96",
+  "categories": ["news", "health", "finance"],
+  "icons": [
+    {"src": "/icons/icon-192.png", "sizes": "192x192", "type": "image/png"},
+    {"src": "/icons/icon-512.png", "sizes": "512x512", "type": "image/png"},
+    {"src": "/icons/maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable"}
+  ],
+  "shortcuts": [
+    {"name": "Agora Pharma", "url": "/pharma/", "icons": [{"src": "/icons/icon-192.png", "sizes": "192x192"}]},
+    {"name": "Agora Health", "url": "/health/", "icons": [{"src": "/icons/icon-192.png", "sizes": "192x192"}]},
+    {"name": "Appeal a denial", "url": "/health/#appeal", "icons": [{"src": "/icons/icon-192.png", "sizes": "192x192"}]}
+  ]
+}
